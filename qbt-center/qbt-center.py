@@ -2,7 +2,8 @@
 # -*- coding: utf-8 -*-
 
 import eventlet
-eventlet.monkey_patch()
+from eventlet.green import threading
+eventlet.monkey_patch(thread=False)
 
 import pprint
 pp = pprint.PrettyPrinter(indent=2)
@@ -14,6 +15,9 @@ from qbittorrent import Client
 #import subprocess
 import time
 import os
+#from watchdog.observers import Observer
+from watchdog.events import PatternMatchingEventHandler
+from watchdog.observers import Observer
 
 class QBTCenter(object):
 
@@ -21,22 +25,24 @@ class QBTCenter(object):
         # define all we need before `configure`
 
         self.hosts = []
+        self.host_num = 0
         self.settings = {}
         self.target = ''
         self.basepath = ''
+        self.watch = ''
         self.pool = eventlet.GreenPool(20)
         self.copy_pool = eventlet.GreenPool(1)
 
+        self.move_backend = FastCopy()
+        #self.move_backend = TestBackend()
         '''
         {
             torrent: <open file>,
             magnet: '<some magnet>',
+            path: '<path to torrent>'
         }
         '''
         self.torrent_pending = eventlet.queue.Queue()
-        self.torrent_finish = eventlet.queue.Queue()
-        self.move_backend = FastCopy()
-        #self.move_backend = TestBackend()
 
         self.configure(config)
         self.connectAll()
@@ -55,6 +61,7 @@ class QBTCenter(object):
 
         self.target = self.settings['target']
         self.basepath = self.settings.get('basepath', '')
+        self.watch = self.settings.get('watch', '.')
 
         # [Host]
         for k, v in config['hosts'].items():
@@ -82,6 +89,14 @@ class QBTCenter(object):
                 return True
             pp.pprint(ret)
         return False
+
+    def get_host(self):
+        # TODO find the host who has less job
+        host = self.hosts[self.host_num]
+        self.host_num += 1
+        if self.host_num == len(self.hosts):
+            self.host_num = 0
+        return host
 
     def get_file_path(self, infohash, qb):
 
@@ -151,11 +166,37 @@ class QBTCenter(object):
             return {'host': host, 'torrents': torrents}
         return None
 
+    def find_new_torrent(self, src_path):
+        self.torrent_pending.put({
+            'torrent': open(src_path, 'rb'),
+            'magnet': None,
+            'path': src_path,
+        })
+
+    def add_pending_torrent(self):
+        while not self.torrent_pending.empty():
+            torrent = self.torrent_pending.pop()
+            self.pool.spawn_n(self.add_torrent, torrent)
+
+    def add_torrent(self, torrent):
+        host = self.get_host()
+        host.addTorrentList([torrent])
+        torrent['torrent'].close()
+
+        # delete the torrent file
+        if 'path' in torrent:
+            os.remove(torrent['path'])
+
     def loop(self):
         # register jobs first:
         # time-based polling update (every 30 min or it will hang)
         # fs watcher and add torrent in queue
         self.pool.spawn_n(self.check_if_torrent_finish_all)
+        self.pool.spawn_n(self.add_pending_torrent)
+
+        observer = Observer()
+        observer.schedule(TorrentHandler(self), path=self.watch)
+        self.pool.spawn_n(observer.start)
 
         self.pool.waitall()
         self.copy_pool.waitall()
@@ -220,6 +261,17 @@ class QBTHost(Client):
         with self.lock:
             self.rid = data['rid']
         return data.get('torrents')
+
+class TorrentHandler(PatternMatchingEventHandler):
+    patterns = ['*.torrent']
+
+    def __init__(self, center, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.center = center
+
+    def on_created(self, event):
+        log.warning("New Torrent ({}) Found.".format(event.src_path))
+        self.center.find_new_torrent(event.src_path)
 
 class MoveBackend(object):
 
@@ -291,6 +343,9 @@ def main(argv):
     '''
     [DEFAULT]
     some global setting
+    basepath =
+    target =
+    watch = 
 
     [Idenity]
     url = <hostname or ip>

@@ -25,6 +25,7 @@ class QBTCenter(object):
         self.target = ''
         self.basepath = ''
         self.pool = eventlet.GreenPool(20)
+        self.copy_pool = eventlet.GreenPool(1)
 
         '''
         {
@@ -127,7 +128,7 @@ class QBTCenter(object):
                         torrents.append(tmp)
                 
                 if torrents:
-                    self.pool.spawn_n(self.move_storage, torrents)
+                    self.copy_pool.spawn_n(self.move_storage, torrents)
             except KeyboardInterrupt:
                 break
             except:

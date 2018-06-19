@@ -82,24 +82,24 @@ class QBTCenter(object):
             pp.pprint(ret)
         return False
 
-    def get_file_path(infohash, qb):
+    def get_file_path(self, infohash, qb):
 
-	# directory
+        # directory
         path = ''
         if self.basepath:
             path = self.basepath
         else:
             path = qb.get_torrent(infohash).get('save_path', '')
 
-	# sub directory or filename
-	files = qb.get_torrent_files(infohash)
-	path += os.path.split(files[0]['name'])[0]
+        # sub directory or filename
+        files = qb.get_torrent_files(infohash)
+        path += os.path.split(files[0]['name'])[0]
 
-	# file
-	if path.endswith(os.sep):
-	    path += files[0]['name']
-	
-	return path
+        # file
+        if path.endswith(os.sep):
+            path += files[0]['name']
+        
+        return path
 
     def move_storage(self, torrents):
 
@@ -108,7 +108,7 @@ class QBTCenter(object):
         for x in torrents:
             if x:
                 host = x['host']
-                paths.expand([self.get_file_path(y, host) for y in x['torrents']])
+                paths.extend([self.get_file_path(y, host) for y in x['torrents']])
         self.move_backend.move(paths, self.target)
 
         # delete torrent
@@ -116,7 +116,7 @@ class QBTCenter(object):
             self.pool.spawn_n(x['host'].delTorrent, x['torrents'])
 
     def check_if_torrent_finish_all(self):
-        while Ture:
+        while True:
             log.warning(time.asctime(time.localtime()))
 
             try:
@@ -154,7 +154,7 @@ class QBTCenter(object):
         # register jobs first:
         # time-based polling update (every 30 min or it will hang)
         # fs watcher and add torrent in queue
-        self.pool.spawn_n(check_if_torrent_finish_all)
+        self.check_if_torrent_finish_all()
 
 
 class QBTHost(Client):

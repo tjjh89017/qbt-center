@@ -40,9 +40,14 @@ class QBTCenter(object):
         if not config:
             raise RuntimeError('Need Config File')
 
+        # [DEFAULT]
+        self.settings = {k: config['settings'][k] for k in config['settings']}
+        pp.pprint(self.settings)
+
+        # [Host]
         for k, v in config['hosts'].items():
+            log.warning('{} {}'.format(k, v.get('url')))
             self.hosts.append(QBTHost(k, v.get('url'), v.get('username', ''), v.get('password', '')))
-        pass
 
     def connect(self, host):
         # if return is None, success
@@ -51,8 +56,10 @@ class QBTCenter(object):
 
     def connectAll(self):
         for host in self.hosts:
-            host.login()
-        pass
+            log.warning("connect to {}".format(host.hostname))
+            ret = host.login()
+            if ret:
+                log.warning(ret)
 
     def reconnect(self, host, tries=5):
         # maybe we need some exception handle to this
@@ -65,16 +72,15 @@ class QBTCenter(object):
         return False
 
     def loop(self):
-        pass
+        self.connectAll()
 
-    pass
 
 class QBTHost(Client):
 
     def __init__(self, hostname, url, username, password):
         super().__init__(url)
 
-        self.hostname = name
+        self.hostname = hostname
         self.username = username
         self.password = password
         self._torrents = []
@@ -87,17 +93,23 @@ class QBTHost(Client):
         self._torrents[:] = self.torrents()
         pass
     
+    def getAllTorrents(self):
+        return self._torrents
+
     def jobs(self):
         return len(self._torrents)
 
     def addTorrent(self, infohash):
-        pass
+        with self.lock:
+            pass
 
     def delTorrent(self, infohash):
-        pass
+        with self.lock:
+            pass
 
     def pauseTorrent(self, infohash):
-        pass
+        with self.lock:
+            pass
 
 def main(argv):
 
@@ -106,8 +118,8 @@ def main(argv):
     import argparse
     from configparser import ConfigParser
 
-    parser = argparse.ArgumentParser(description='qBittorrent Center')
-    parser.add_argument('-c', '--config', type=argparse.FileType('r'))
+    parser = argparse.ArgumentParser(description='qBT Center')
+    parser.add_argument('-c', '--config', type=argparse.FileType('r'), required=True)
     result = parser.parse_args()
 
     '''
@@ -124,7 +136,6 @@ def main(argv):
     username = 
     password = 
     '''
-    # TODO parse from config file
     config_parser = ConfigParser()
     config_parser.read_string(result.config.read())
 
@@ -135,8 +146,6 @@ def main(argv):
 
     center = QBTCenter(config)
     center.loop()
-
-    pass
 
 if __name__ == '__main__':
     import sys

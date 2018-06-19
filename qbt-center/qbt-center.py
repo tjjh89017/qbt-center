@@ -11,26 +11,34 @@ import logging
 log = logging.getLogger(__name__)
 
 from qbittorrent import Client
-import subprocess
+#import subprocess
 import time
+import os
 
 class QBTCenter(object):
-
-    __DEFAULT = {
-        'username': 'admin',
-        'password': 'adminadmin',
-    }
 
     def __init__(self, config=None):
         # define all we need before `configure`
 
         self.hosts = []
         self.settings = {}
+        self.target = ''
+        self.basepath = ''
         self.pool = eventlet.GreenPool(20)
+
+        '''
+        {
+            torrent: <open file>,
+            magnet: '<some magnet>',
+        }
+        '''
+        self.torrent_pending = eventlet.queue.Queue()
+        self.torrent_finish = eventlet.queue.Queue()
+        #self.move_backend = FastCopy()
+        self.move_backend = TestBackend()
 
         self.configure(config)
         self.connectAll()
-        pass
 
     def __del__(self):
         for host in self.hosts:
@@ -43,6 +51,9 @@ class QBTCenter(object):
         # [DEFAULT]
         self.settings = {k: config['settings'][k] for k in config['settings']}
         pp.pprint(self.settings)
+
+        self.target = self.settings['target']
+        self.basepath = self.settings.get('basepath', '')
 
         # [Host]
         for k, v in config['hosts'].items():
@@ -71,8 +82,79 @@ class QBTCenter(object):
             pp.pprint(ret)
         return False
 
+    def get_file_path(infohash, qb):
+
+	# directory
+        path = ''
+        if self.basepath:
+            path = self.basepath
+        else:
+            path = qb.get_torrent(infohash).get('save_path', '')
+
+	# sub directory or filename
+	files = qb.get_torrent_files(infohash)
+	path += os.path.split(files[0]['name'])[0]
+
+	# file
+	if path.endswith(os.sep):
+	    path += files[0]['name']
+	
+	return path
+
+    def move_storage(self, torrents):
+
+        # create a list contain all finished torrents
+        paths = []
+        for x in torrents:
+            if x:
+                host = x['host']
+                paths.expand([self.get_file_path(y, host) for y in x['torrents']])
+        self.move_backend.move(paths, self.target)
+
+        # delete torrent
+        for x in torrents:
+            self.pool.spawn_n(x['host'].delTorrent, x['torrents'])
+
+    def check_if_torrent_finish_all(self):
+        while Ture:
+            log.warning(time.asctime(time.localtime()))
+
+            try:
+                torrents = []
+                for host in self.hosts:
+                    tmp = self.check_if_torrent_finish(host)
+                    if tmp:
+                        torrents.append(tmp)
+                
+                if torrents:
+                    self.pool.spawn_n(self.move_storage, torrents)
+            except KeyboardInterrupt:
+                break
+            except:
+                self.connectAll()
+                continue
+
+            time.sleep(10 * 60)
+        
+    def check_if_torrent_finish(self, host):
+        tmp = host.sync()
+        if tmp is None:
+            return None
+        torrents = []
+        for infohash, torrent in tmp.items():
+            if 'pausedUP' == torrent.get('state'):
+                log.warning("{} finish at {}.".format(infohash, host.hostname))
+                torrents.append(infohash)
+
+        if torrents:
+            return {'host': host, 'torrents': torrents}
+        return None
+
     def loop(self):
-        self.connectAll()
+        # register jobs first:
+        # time-based polling update (every 30 min or it will hang)
+        # fs watcher and add torrent in queue
+        self.pool.spawn_n(check_if_torrent_finish_all)
 
 
 class QBTHost(Client):
@@ -84,32 +166,112 @@ class QBTHost(Client):
         self.username = username
         self.password = password
         self._torrents = []
+        self.rid = 0
 
         # Only one thread can write to this host
         self.lock = eventlet.semaphore.Semaphore()
 
     def login(self, *args, **kwargs):
         super().login(self.username, self.password)
-        self._torrents[:] = self.torrents()
-        pass
+        self.rid = 0
+        self.updateTorrents()
+
+    def updateTorrents(self):
+        with self.lock:
+            self._torrents = self.torrents()
     
     def getAllTorrents(self):
-        return self._torrents
+        return self._torrents[:]
 
     def jobs(self):
         return len(self._torrents)
 
-    def addTorrent(self, infohash):
+    def addTorrentList(self, torrents):
         with self.lock:
-            pass
+            f = []
+            l = []
+            for x in torrents:
+                t = x.get('torrent', None)
+                m = x.get('magnet', None)
+                if t:
+                    f.append(t)
+                elif m:
+                    l.append(m)
+            self.download_from_file(f)
+            self.download_from_link(l)
+        
+        self.updateTorrents()
 
-    def delTorrent(self, infohash):
+    def delTorrent(self, infohash_list):
         with self.lock:
-            pass
+            self.delete(infohash_list)
+            self._torrents = list([x for x in self._torrents if x['hash'] not in infohash_list])
 
     def pauseTorrent(self, infohash):
         with self.lock:
             pass
+
+    def sync(self):
+        data = super().sync(self.rid)
+        with self.lock:
+            self.rid = data['rid']
+        return data.get('torrents')
+
+class MoveBackend(object):
+
+    def move(self, src_list, dst):
+        pass
+
+class TestBackend(object):
+
+    def move(self, src_list, dst):
+        pp.pprint(src_list)
+        pp.pprint(dst)
+
+class FastCopy(MoveBackend):
+
+    def __init__(self):
+
+        self.fastcopy_cmd = [
+            'fastcopy.exe',
+            '/cmd=move',
+            '/estimate',
+            '/acl=FALSE',
+            '/stream=FALSE',
+            '/reparse=FALSE',
+            '/verify=FALSE',
+            '/recreate',
+            '/error_stop=FALSE',
+            '/no_ui',
+            '/balloon=FALSE',
+            #'"somefile"',
+            #'/to="target"',
+        ]
+
+        # import module here
+        self.subprocess = __import__('subprocess')
+        self.psutil = __import__('psutil')
+
+    def move(self, src_list, dst):
+        self.subprocess.call(self.fastcopy_cmd + src_list + ['/to={}'.format(dst)])
+        pids = [p.info['pid'] for p in self.psutil.process_iter(attrs=['pid', 'name']) if 'FastCopy' in p.info['name']]
+        # wait for FastCopy finish
+        for pid in pids:
+            try:
+                process = self.psutil.Process(pid)
+            except self.psutil.NoSuchProcess:
+                continue
+
+            while True:
+                try:
+                    time.sleep(10)
+                    process.wait(0)
+                except self.psutil.TimeoutExpired:
+                    continue
+                except:
+                    break
+                else:
+                    break
 
 def main(argv):
 

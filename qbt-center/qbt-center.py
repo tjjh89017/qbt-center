@@ -35,8 +35,8 @@ class QBTCenter(object):
         '''
         self.torrent_pending = eventlet.queue.Queue()
         self.torrent_finish = eventlet.queue.Queue()
-        #self.move_backend = FastCopy()
-        self.move_backend = TestBackend()
+        self.move_backend = FastCopy()
+        #self.move_backend = TestBackend()
 
         self.configure(config)
         self.connectAll()
@@ -155,7 +155,10 @@ class QBTCenter(object):
         # register jobs first:
         # time-based polling update (every 30 min or it will hang)
         # fs watcher and add torrent in queue
-        self.check_if_torrent_finish_all()
+        self.pool.spawn_n(self.check_if_torrent_finish_all)
+
+        self.pool.waitall()
+        self.copy_pool.waitall()
 
 
 class QBTHost(Client):

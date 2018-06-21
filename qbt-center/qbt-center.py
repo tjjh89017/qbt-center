@@ -349,8 +349,9 @@ class FastCopy(MoveBackend):
         for pid in pids:
             try:
                 process = self.psutil.Process(pid)
-                if 'QBT_CENTER' in process.environ():
-                    log.warning('Found FastCopy. Waiting for it.')
+                if 'QBT_CENTER' not in process.environ():
+                    continue
+                log.warning('Found FastCopy. Waiting for it.')
             except self.psutil.NoSuchProcess:
                 continue
 

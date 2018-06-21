@@ -33,6 +33,7 @@ class QBTCenter(object):
         self.basepath = ''
         self.watch = ''
         self.interval = 60
+        self.speed_interval = 60
         self.mtime = 0
         self.pool = eventlet.GreenPool(20)
         self.copy_pool = eventlet.GreenPool(1)
@@ -66,6 +67,7 @@ class QBTCenter(object):
         self.basepath = self.settings.get('basepath', '')
         self.watch = self.settings.get('watch', '.')
         self.interval = int(self.settings.get('interval', 60))
+        self.speed_interval = int(self.settings.get('speed_interval', 60))
 
         # [Host]
         for k, v in config['hosts'].items():
@@ -263,7 +265,7 @@ class QBTCenter(object):
         self.pool.spawn_n(self.check_if_torrent_finish_all)
         self.pool.spawn_n(self.setup_file_watcher, self.watch, self.interval)
         self.pool.spawn_n(self.add_pending_torrent)
-        self.pool.spawn_n(self.setup_speed_watcher, 30)
+        self.pool.spawn_n(self.setup_speed_watcher, self.speed_interval)
 
         self.pool.waitall()
         self.copy_pool.waitall()
@@ -404,6 +406,7 @@ def main(argv):
     target = F:\\test\\
     watch = X:\\watch_\\
     interval = 10
+    speed_interval = 10
 
     [Idenity]
     url = <hostname or ip>

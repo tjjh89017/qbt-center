@@ -31,6 +31,7 @@ class QBTCenter(object):
         self.basepath = ''
         self.watch = ''
         self.interval = 60
+        self.mtime = 0
         self.pool = eventlet.GreenPool(20)
         self.copy_pool = eventlet.GreenPool(1)
 
@@ -185,41 +186,39 @@ class QBTCenter(object):
         # delete the torrent file
         os.remove(torrent['torrent'])
 
-    def file_watcher(self, path, interval):
+    def setup_file_watcher(self, path, interval):
         # check directory accessable
         if not os.access(path, os.R_OK):
             log.warning("File watcher failed. Check the permission")
             return False
+        self.pool.spawn_n(self.file_watcher, path, interval)
 
-        # first scan all torrents in path
-        mtime = 0
-        while True:
-            try:
-                stat = os.stat(path)
-                if stat.st_mtime > mtime:
-                    # directory has changed
-                    torrents = glob.iglob(os.path.join(path, '*.torrent'))
-                    for torrent in torrents:
-                        log.warning('{} found.'.format(torrent))
-                        self.torrent_pending.put({
-                            'torrent': torrent,
-                            'magnet': None,
-                        })
+    def file_watcher(self, path, interval):
+        try:
+            stat = os.stat(path)
+            if stat.st_mtime > self.mtime:
+                # directory has changed
+                torrents = glob.iglob(os.path.join(path, '*.torrent'))
+                for torrent in torrents:
+                    log.warning('{} found.'.format(torrent))
+                    self.torrent_pending.put({
+                        'torrent': torrent,
+                        'magnet': None,
+                    })
 
-                    mtime = stat.st_mtime
-            except KeyboardInterrupt:
-                return
-            except:
-                continue
-            finally:
-                time.sleep(interval)
+                self.mtime = stat.st_mtime
+        except KeyboardInterrupt:
+            return
+        finally:
+            time.sleep(interval)
+            self.pool.spawn_n(self.file_watcher, path, interval)
 
     def loop(self):
         # register jobs first:
         # time-based polling update (every 30 min or it will hang)
         # fs watcher and add torrent in queue
         self.pool.spawn_n(self.check_if_torrent_finish_all)
-        self.pool.spawn_n(self.file_watcher, self.watch, self.interval)
+        self.pool.spawn_n(self.setup_file_watcher, self.watch, self.interval)
         self.pool.spawn_n(self.add_pending_torrent)
 
         self.pool.waitall()

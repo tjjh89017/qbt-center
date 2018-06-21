@@ -14,16 +14,23 @@ from qbittorrent import Client
 #import subprocess
 import time
 import os
+import glob
 
 class QBTCenter(object):
 
     def __init__(self, config=None):
         # define all we need before `configure`
 
+        # for get host
+        self.host_num = 0
         self.hosts = []
+        self.host_lock = eventlet.semaphore.Semaphore()
+
         self.settings = {}
         self.target = ''
         self.basepath = ''
+        self.watch = ''
+        self.interval = 60
         self.pool = eventlet.GreenPool(20)
         self.copy_pool = eventlet.GreenPool(1)
 
@@ -31,10 +38,10 @@ class QBTCenter(object):
         {
             torrent: <open file>,
             magnet: '<some magnet>',
+            path: '<apth to torrent>'
         }
         '''
         self.torrent_pending = eventlet.queue.Queue()
-        self.torrent_finish = eventlet.queue.Queue()
         self.move_backend = FastCopy()
         #self.move_backend = TestBackend()
 
@@ -55,6 +62,8 @@ class QBTCenter(object):
 
         self.target = self.settings['target']
         self.basepath = self.settings.get('basepath', '')
+        self.watch = self.settings.get('watch', '.')
+        self.interval = int(self.settings.get('interval', 60))
 
         # [Host]
         for k, v in config['hosts'].items():
@@ -82,6 +91,15 @@ class QBTCenter(object):
                 return True
             pp.pprint(ret)
         return False
+
+    def get_host(self):
+        # TODO find the host who has less job
+        with self.host_lock:
+            host = self.hosts[self.host_num]
+            self.host_num += 1
+            if self.host_num == len(self.hosts):
+                self.host_num = 0
+            return host
 
     def get_file_path(self, infohash, qb):
 
@@ -151,11 +169,60 @@ class QBTCenter(object):
             return {'host': host, 'torrents': torrents}
         return None
 
+    def add_pending_torrent(self):
+        while True:
+            while not self.torrent_pending.empty():
+                torrent = self.torrent_pending.get()
+                self.pool.spawn_n(self.add_torrent, torrent)
+            time.sleep(self.interval)
+
+    def add_torrent(self, torrent):
+        # assume always use torrent file rather than magnet
+        host = self.get_host()
+        log.warning('add {} to {}.'.format(torrent['path'], host.hostname))
+        host.addTorrentList([torrent])
+        torrent['torrent'].close()
+
+        # delete the torrent file
+        os.remove(torrent['path'])
+
+    def file_watcher(self, path, interval):
+        # check directory accessable
+        if not os.access(path, os.R_OK):
+            log.warning("File watcher failed. Check the permission")
+            return False
+
+        # first scan all torrents in path
+        mtime = 0
+        while True:
+            try:
+                stat = os.stat(path)
+                if stat.st_mtime > mtime:
+                    # directory has changed
+                    torrents = glob.iglob(os.path.join(path, '*.torrent'))
+                    for torrent in torrents:
+                        log.warning('{} found.'.format(torrent))
+                        self.torrent_pending.put({
+                            'torrent': open(torrent, 'rb'),
+                            'magnet': None,
+                            'path': torrent,
+                        })
+
+                    mtime = stat.st_mtime
+            except KeyboardInterrupt:
+                return
+            except:
+                continue
+            finally:
+                time.sleep(interval)
+
     def loop(self):
         # register jobs first:
         # time-based polling update (every 30 min or it will hang)
         # fs watcher and add torrent in queue
         self.pool.spawn_n(self.check_if_torrent_finish_all)
+        self.pool.spawn_n(self.file_watcher, self.watch, self.interval)
+        self.pool.spawn_n(self.add_pending_torrent)
 
         self.pool.waitall()
         self.copy_pool.waitall()

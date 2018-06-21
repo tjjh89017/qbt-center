@@ -396,7 +396,7 @@ def main(argv):
     from configparser import ConfigParser
 
     parser = argparse.ArgumentParser(description='qBT Center')
-    parser.add_argument('-c', '--config', type=argparse.FileType('r'), required=True)
+    parser.add_argument('-c', '--config', action='store', required=True)
     result = parser.parse_args()
 
     '''
@@ -419,7 +419,7 @@ def main(argv):
     password = 
     '''
     config_parser = ConfigParser()
-    config_parser.read_string(result.config.read())
+    config_parser.read(result.config, encoding='utf8')
 
     config = {
         'hosts': {x: config_parser[x] for x in config_parser.sections()},

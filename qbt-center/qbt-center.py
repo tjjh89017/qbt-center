@@ -237,6 +237,25 @@ class QBTCenter(object):
             time.sleep(interval)
             self.pool.spawn_n(self.file_watcher, path, interval)
 
+    def setup_speed_watcher(self, interval):
+        self.pool.spawn_n(self.speed_watcher, interval)
+
+    def speed_watcher(self, interval):
+        down_speed = 0
+        up_speed = 0
+
+        for host in self.hosts:
+            info = host.global_transfer_info
+            down_speed += info['dl_info_speed']
+            up_speed += info['up_info_speed']
+
+        down_speed /= (1024 * 1024)
+        up_speed /= (1024 * 1024)
+        log.warning('[D: {:.1f}MB/s][U: {:.1f}MB/s]'.format(down_speed, up_speed))
+
+        time.sleep(interval)
+        self.pool.spawn_n(self.speed_watcher, interval)
+
     def loop(self):
         # register jobs first:
         # time-based polling update (every 30 min or it will hang)
@@ -244,6 +263,7 @@ class QBTCenter(object):
         self.pool.spawn_n(self.check_if_torrent_finish_all)
         self.pool.spawn_n(self.setup_file_watcher, self.watch, self.interval)
         self.pool.spawn_n(self.add_pending_torrent)
+        self.pool.spawn_n(self.setup_speed_watcher, 30)
 
         self.pool.waitall()
         self.copy_pool.waitall()

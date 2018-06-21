@@ -36,9 +36,8 @@ class QBTCenter(object):
 
         '''
         {
-            torrent: <open file>,
+            torrent: '<path to torrent>',
             magnet: '<some magnet>',
-            path: '<apth to torrent>'
         }
         '''
         self.torrent_pending = eventlet.queue.Queue()
@@ -179,12 +178,12 @@ class QBTCenter(object):
     def add_torrent(self, torrent):
         # assume always use torrent file rather than magnet
         host = self.get_host()
-        log.warning('add {} to {}.'.format(torrent['path'], host.hostname))
-        host.addTorrentList([torrent])
-        torrent['torrent'].close()
+        log.warning('add {} to {}.'.format(torrent['torrent'], host.hostname))
+        with open(torrent['torrent'], 'rb') as t:
+            host.addTorrent(t)
 
         # delete the torrent file
-        os.remove(torrent['path'])
+        os.remove(torrent['torrent'])
 
     def file_watcher(self, path, interval):
         # check directory accessable
@@ -203,9 +202,8 @@ class QBTCenter(object):
                     for torrent in torrents:
                         log.warning('{} found.'.format(torrent))
                         self.torrent_pending.put({
-                            'torrent': open(torrent, 'rb'),
+                            'torrent': torrent,
                             'magnet': None,
-                            'path': torrent,
                         })
 
                     mtime = stat.st_mtime
@@ -257,21 +255,15 @@ class QBTHost(Client):
     def jobs(self):
         return len(self._torrents)
 
-    def addTorrentList(self, torrents):
+    def addTorrent(self, torrent):
         with self.lock:
-            f = []
-            l = []
-            for x in torrents:
-                t = x.get('torrent', None)
-                m = x.get('magnet', None)
-                if t:
-                    f.append(t)
-                elif m:
-                    l.append(m)
-            self.download_from_file(f)
-            self.download_from_link(l)
+            self.download_from_file(torrent)
         
         self.updateTorrents()
+
+    def addMagnet(self, magnet):
+        # TODO
+        pass
 
     def delTorrent(self, infohash_list):
         with self.lock:
@@ -358,6 +350,10 @@ def main(argv):
     '''
     [DEFAULT]
     some global setting
+    basepath = X:\\done\\
+    target = F:\\test\\
+    watch = X:\\watch_\\
+    interval = 10
 
     [Idenity]
     url = <hostname or ip>

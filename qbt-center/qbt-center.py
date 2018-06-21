@@ -15,6 +15,8 @@ from qbittorrent import Client
 import time
 import os
 import glob
+import bencode
+import hashlib
 
 class QBTCenter(object):
 
@@ -173,7 +175,29 @@ class QBTCenter(object):
         while True:
             while not self.torrent_pending.empty():
                 torrent = self.torrent_pending.get()
-                self.pool.spawn_n(self.add_torrent, torrent)
+
+                try:
+                    # check this torrent exist or not
+                    infohash = ''
+                    with open(torrent['torrent'], 'rb') as f:
+                        info = bencode.bread(f)
+                        infohash = hashlib.sha1(bencode.encode(info['info'])).hexdigest()
+                    # search all host
+                    is_exist = False
+                    for host in self.hosts:
+                        if host.torrents(hashes=infohash):
+                            is_exist = True
+                            break
+                    if is_exist:
+                        log.warning('{} exist.'.format(torrent['torrent']))
+                        os.remove(torrent['torrent'])
+                        continue
+
+                    self.add_torrent(torrent)
+                except KeyboardInterrupt:
+                    break
+                except:
+                    continue
             time.sleep(self.interval)
 
     def add_torrent(self, torrent):

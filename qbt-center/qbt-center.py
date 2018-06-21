@@ -318,6 +318,9 @@ class FastCopy(MoveBackend):
 
     def __init__(self):
 
+        self.env = os.environ.copy()
+        self.env['QBT_CENTER'] = 'using'
+
         self.fastcopy_cmd = [
             'fastcopy.exe',
             '/cmd=move',
@@ -330,6 +333,7 @@ class FastCopy(MoveBackend):
             '/error_stop=FALSE',
             '/no_ui',
             '/balloon=FALSE',
+            '/force_start',
             #'"somefile"',
             #'/to="target"',
         ]
@@ -339,12 +343,14 @@ class FastCopy(MoveBackend):
         self.psutil = __import__('psutil')
 
     def move(self, src_list, dst):
-        self.subprocess.call(self.fastcopy_cmd + src_list + ['/to={}'.format(dst)])
+        self.subprocess.call(self.fastcopy_cmd + src_list + ['/to={}'.format(dst)], env=self.env.copy())
         pids = [p.info['pid'] for p in self.psutil.process_iter(attrs=['pid', 'name']) if 'FastCopy' in p.info['name']]
         # wait for FastCopy finish
         for pid in pids:
             try:
                 process = self.psutil.Process(pid)
+                if 'QBT_CENTER' in process.environ():
+                    log.warning('Found FastCopy. Waiting for it.')
             except self.psutil.NoSuchProcess:
                 continue
 

@@ -14,14 +14,19 @@ from qbittorrent import Client
 #import subprocess
 import time
 import os
+import sys
+import re
 import glob
 import bencode
 import hashlib
+import base64
+import select
 
 class QBTCenter(object):
 
     def __init__(self, config=None):
         # define all we need before `configure`
+        self.magnet_pattern = re.compile(r'magnet:\?.*xt=urn:(?:btih|sha1):([A-Za-z0-9]*)&?.*')
 
         # for get host
         self.host_num = 0
@@ -177,30 +182,48 @@ class QBTCenter(object):
         while True:
             while not self.torrent_pending.empty():
                 torrent = self.torrent_pending.get()
-
+                #log.warning(torrent)
                 try:
-                    # check this torrent exist or not
-                    infohash = ''
-                    with open(torrent['torrent'], 'rb') as f:
-                        info = bencode.bread(f)
-                        infohash = hashlib.sha1(bencode.encode(info['info'])).hexdigest()
-                    # search all host
-                    is_exist = False
-                    for host in self.hosts:
-                        if host.torrents(hashes=infohash):
-                            is_exist = True
-                            break
-                    if is_exist:
-                        log.warning('{} exist.'.format(torrent['torrent']))
-                        os.remove(torrent['torrent'])
-                        continue
+                    if torrent['torrent']:
+                        # check this torrent exist or not
+                        infohash = ''
+                        with open(torrent['torrent'], 'rb') as f:
+                            info = bencode.bread(f)
+                            infohash = hashlib.sha1(bencode.encode(info['info'])).hexdigest()
+                        # search all host
+                        is_exist = False
+                        for host in self.hosts:
+                            if host.torrents(hashes=infohash):
+                                is_exist = True
+                                break
+                        if is_exist:
+                            log.warning('{} exist.'.format(torrent['torrent']))
+                            os.remove(torrent['torrent'])
+                            continue
+                        self.add_torrent(torrent)
+                    else:
+                        # magnet
+                        magnet = torrent['magnet']
+                        infohash = self.magnet_pattern.search(magnet).group(1)
+                        if len(infohash) == 32:
+                            infohash = base64.b32decode(infohash).hex()
+                        # search all host
+                        is_exist = False
+                        for host in self.hosts:
+                            if host.torrents(hashes=infohash):
+                                is_exist = True
+                                break
+                        if is_exist:
+                            log.warning('{} exist.'.format(infohash))
+                            continue
+                        self.add_magnet(magnet)
 
-                    self.add_torrent(torrent)
                 except KeyboardInterrupt:
                     break
                 except OSError:
                     log.warning('OSError {}'.format(torrent['torrent']))
                 except:
+                    log.warning('except')
                     continue
             time.sleep(self.interval)
 
@@ -212,6 +235,12 @@ class QBTCenter(object):
 
         # delete the torrent file
         os.remove(torrent['torrent'])
+
+    def add_magnet(self, magnet):
+        # assume always use torrent file rather than magnet
+        host = self.get_host()
+        log.warning('add {} to {}.'.format(magnet, host.hostname))
+        host.addMagnet(magnet)
 
     def setup_file_watcher(self, path, interval):
         # check directory accessable
@@ -259,6 +288,28 @@ class QBTCenter(object):
         time.sleep(interval)
         self.pool.spawn_n(self.speed_watcher, interval)
 
+    def setup_input_watcher(self):
+        server = eventlet.listen(('127.0.0.1', 9999))
+        while True:
+            try:
+                sock, address = server.accept()
+                self.pool.spawn_n(self.input_watcher, sock.makefile('r'))
+            except (SystemExit, KeyboardInterrupt):
+                break
+            except:
+                continue
+
+    def input_watcher(self, fd):
+        while True:
+            uri = fd.readline()
+            if not uri:
+                break
+            log.warning(uri)
+            self.torrent_pending.put({
+                'torrent': None,
+                'magnet': uri,
+            })
+
     def loop(self):
         # register jobs first:
         # time-based polling update (every 30 min or it will hang)
@@ -267,6 +318,7 @@ class QBTCenter(object):
         self.pool.spawn_n(self.setup_file_watcher, self.watch, self.interval)
         self.pool.spawn_n(self.add_pending_torrent)
         self.pool.spawn_n(self.setup_speed_watcher, self.speed_interval)
+        self.pool.spawn_n(self.setup_input_watcher)
 
         self.pool.waitall()
         self.copy_pool.waitall()
@@ -310,8 +362,11 @@ class QBTHost(Client):
         self.updateTorrents()
 
     def addMagnet(self, magnet):
-        # TODO
-        pass
+        with self.lock:
+            r = self.download_from_link(magnet)
+            log.warning(r)
+
+        self.updateTorrents()
 
     def delTorrent(self, infohash_list):
         with self.lock:

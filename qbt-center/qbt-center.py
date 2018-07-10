@@ -198,6 +198,8 @@ class QBTCenter(object):
                     self.add_torrent(torrent)
                 except KeyboardInterrupt:
                     break
+                except OSError:
+                    log.warning('OSError {}'.format(torrent['torrent']))
                 except:
                     continue
             time.sleep(self.interval)
@@ -206,8 +208,7 @@ class QBTCenter(object):
         # assume always use torrent file rather than magnet
         host = self.get_host()
         log.warning('add {} to {}.'.format(torrent['torrent'], host.hostname))
-        with open(torrent['torrent'], 'rb') as t:
-            host.addTorrent(t)
+        host.addTorrent(torrent['torrent'])
 
         # delete the torrent file
         os.remove(torrent['torrent'])
@@ -302,7 +303,9 @@ class QBTHost(Client):
 
     def addTorrent(self, torrent):
         with self.lock:
-            self.download_from_file(torrent)
+            with open(torrent, 'rb') as t:
+                r = self.download_from_file(('some shit', t.read()))
+                log.warning(r)
         
         self.updateTorrents()
 

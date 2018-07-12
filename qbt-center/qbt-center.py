@@ -414,6 +414,7 @@ class FastCopy(MoveBackend):
             '/no_ui',
             '/balloon=FALSE',
             '/force_start',
+            '/force_close',
             #'"somefile"',
             #'/to="target"',
         ]

@@ -157,7 +157,7 @@ def main(argv):
         'settings': config_parser['DEFAULT'],
     }
 
-    center = QBTCenter(config)
+    center = QBTCenter(config, ui=True)
     #center.loop()
 
     eventlet.spawn_n(center.loop)

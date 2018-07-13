@@ -24,7 +24,7 @@ import select
 
 class QBTCenter(object):
 
-    def __init__(self, config=None):
+    def __init__(self, config=None, ui=False):
         # define all we need before `configure`
         self.magnet_pattern = re.compile(r'magnet:\?.*xt=urn:(?:btih|sha1):([A-Za-z0-9]*)&?.*')
 
@@ -35,7 +35,10 @@ class QBTCenter(object):
 
         self.down_speed = 0
         self.up_speed = 0
-        self.log_queue = eventlet.queue.Queue()
+        self.log_queue = DummyQueue()
+        
+        if ui:
+            self.log_queue = eventlet.queue.Queue()
 
         self.settings = {}
         self.target = ''
@@ -465,6 +468,14 @@ class FastCopy(MoveBackend):
                     break
                 else:
                     break
+
+class DummyQueue(object):
+    def __init__(self):
+        pass
+    def put(self, *args, **kwargs):
+        pass
+    def get(self, *args, **kwargs):
+        pass
 
 def main(argv):
 

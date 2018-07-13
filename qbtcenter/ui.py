@@ -49,7 +49,7 @@ class MainView(Frame):
         button_layout = Layout([1, 1])
         self.add_layout(button_layout)
         button_layout.add_widget(Button("Quit", self._quit), 0)
-        button_layout.add_widget(Button("OK", self._ok), 1)
+        button_layout.add_widget(Button("Clear Log", self._clear_log), 1)
 
         self.fix()
 
@@ -63,9 +63,9 @@ class MainView(Frame):
     def _quit():
         raise StopApplication('Quit')
 
-    @staticmethod
-    def _ok():
-        pass
+    def _clear_log(self):
+        self.log_text.clear()
+        self.screen.force_update()
 
     def get_log(self):
 

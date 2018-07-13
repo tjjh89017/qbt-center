@@ -33,6 +33,10 @@ class QBTCenter(object):
         self.hosts = []
         self.host_lock = eventlet.semaphore.Semaphore()
 
+        self.down_speed = 0
+        self.up_speed = 0
+        self.log_queue = eventlet.queue.Queue()
+
         self.settings = {}
         self.target = ''
         self.basepath = ''
@@ -172,6 +176,7 @@ class QBTCenter(object):
         for infohash, torrent in tmp.items():
             if 'pausedUP' == torrent.get('state'):
                 log.warning("{} finish at {}.".format(infohash, host.hostname))
+                self.log_queue.put("{} finish at {}.".format(infohash, host.hostname))
                 torrents.append(infohash)
 
         if torrents:
@@ -198,6 +203,7 @@ class QBTCenter(object):
                                 break
                         if is_exist:
                             log.warning('{} exist.'.format(torrent['torrent']))
+                            self.log_queue.put('exist {}.'.format(torrent['torrent']))
                             os.remove(torrent['torrent'])
                             continue
                         self.add_torrent(torrent)
@@ -215,6 +221,7 @@ class QBTCenter(object):
                                 break
                         if is_exist:
                             log.warning('{} exist.'.format(infohash))
+                            self.log_queue.put('exist {}.'.format(infohash))
                             continue
                         self.add_magnet(magnet)
 
@@ -230,8 +237,9 @@ class QBTCenter(object):
     def add_torrent(self, torrent):
         # assume always use torrent file rather than magnet
         host = self.get_host()
-        log.warning('add {} to {}.'.format(torrent['torrent'], host.hostname))
-        host.addTorrent(torrent['torrent'])
+        log.warning('{} add {}.'.format(torrent['torrent'], host.hostname))
+        self.log_queue.put('{} add {}.'.format(host.hostname, torrent['torrent']))
+        self.log_queue.put(host.addTorrent(torrent['torrent']))
 
         # delete the torrent file
         os.remove(torrent['torrent'])
@@ -240,7 +248,8 @@ class QBTCenter(object):
         # assume always use torrent file rather than magnet
         host = self.get_host()
         log.warning('add {} to {}.'.format(magnet, host.hostname))
-        host.addMagnet(magnet)
+        self.log_queue.put('{} add {}.'.format(host.hostname, magnet))
+        self.log_queue.put(host.addMagnet(magnet))
 
     def setup_file_watcher(self, path, interval):
         # check directory accessable
@@ -257,6 +266,7 @@ class QBTCenter(object):
                 torrents = glob.iglob(os.path.join(path, '*.torrent'))
                 for torrent in torrents:
                     log.warning('{} found.'.format(torrent))
+                    self.log_queue.put('found {}.'.format(torrent))
                     self.torrent_pending.put({
                         'torrent': torrent,
                         'magnet': None,
@@ -283,7 +293,10 @@ class QBTCenter(object):
 
         down_speed /= (1024 * 1024)
         up_speed /= (1024 * 1024)
-        log.warning('[D: {:.1f}MB/s][U: {:.1f}MB/s]'.format(down_speed, up_speed))
+
+        self.down_speed = down_speed
+        self.up_speed = up_speed
+        #log.warning('[D: {:.1f}MB/s][U: {:.1f}MB/s]'.format(self.down_speed, self.up_speed))
 
         time.sleep(interval)
         self.pool.spawn_n(self.speed_watcher, interval)
@@ -305,6 +318,7 @@ class QBTCenter(object):
             if not uri:
                 break
             log.warning(uri)
+            self.log_queue.put(uri)
             self.torrent_pending.put({
                 'torrent': None,
                 'magnet': uri,
@@ -354,19 +368,23 @@ class QBTHost(Client):
         return len(self._torrents)
 
     def addTorrent(self, torrent):
+        r = ''
         with self.lock:
             with open(torrent, 'rb') as t:
                 r = self.download_from_file(('some shit', t.read()))
                 log.warning(r)
         
         self.updateTorrents()
+        return r
 
     def addMagnet(self, magnet):
+        r = ''
         with self.lock:
             r = self.download_from_link(magnet)
             log.warning(r)
 
         self.updateTorrents()
+        return r
 
     def delTorrent(self, infohash_list):
         with self.lock:
@@ -433,6 +451,7 @@ class FastCopy(MoveBackend):
                 if 'QBT_CENTER' not in process.environ():
                     continue
                 log.warning('Found FastCopy. Waiting for it.')
+                self.log_queue.put('Found FastCopy. Waiting for it.')
             except self.psutil.NoSuchProcess:
                 continue
 
